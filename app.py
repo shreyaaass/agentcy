@@ -9,81 +9,28 @@ from transformers import (
 )
 from accelerate import infer_auto_device_map, init_empty_weights
 import os
+import pathlib
+import textwrap
+import google.generativeai as genai
 
 
 # App title
-st.set_page_config(page_title="🦙💬 Llama 2 Chatbot")
+st.set_page_config(page_title="🦙💬 Chatbot")
 
-token = os.environ["HF_TOKEN"]
-
-
-def clear_model():
-    try:
-        torch.cuda.empty_cache()
-        global tokenizer
-        global model
-        del tokenizer
-        del model
-        torch.cuda.empty_cache()
-        print("memory freed")
-    except Exception as e:
-        print(e)
-
-
-@st.cache_resource
-def load_model(model_id):
-    if torch.cuda.is_available():
-        bnb_config = BitsAndBytesConfig(
-            llm_int8_enable_fp32_cpu_offload=True,
-            load_in_8bit_fp32_cpu_offload=True,
-            load_in_4bit=True,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-        )
-
-    config = AutoConfig.from_pretrained(
-        model_id,
-        quantization_config=bnb_config if torch.cuda.is_available() else None,
-    )
-    config.use_cache = False
-    with init_empty_weights():
-        model = AutoModelForCausalLM.from_config(config)
-    device_map = infer_auto_device_map(model=model)
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        token=token,
-        device_map=device_map,
-        attn_implementation="flash_attention_2"
-        if torch.cuda.is_available()
-        else "eager",
-    )
-
-    return model
-
-
-@st.cache_resource
-def load_tokenizer(model_id):
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_id, use_fast=True, token=token, legacy=False, padding_side="left"
-    )
-    return tokenizer
-
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 torch.cuda.empty_cache()
 
 with st.sidebar:
     st.title("🦙💬 Tagglabs Chatbot")
+    selected_model = st.sidebar.selectbox(
+        "Choose a model",
+        ["gemini-1.0-pro","gemini-1.0-pro-001","gemini-1.0-pro-latest","gemini-1.0-pro-vision-latest","gemini-pro","gemini-pro-vision",],
+        key="selected_model",
+        index = None,
+    )
+model = genai.GenerativeModel(selected_model)
 
-    # Refactored from https://github.com/a16z-infra/llama2-chatbot
-    # st.subheader("Models and parameters")
-
-# model_id = "HuggingFaceH4/zephyr-7b-beta"
-model_id = "google/gemma-7b"
-
-model = load_model(model_id)
-tokenizer = load_tokenizer(model_id)
 
 # Store LLM generated responses
 if "messages" not in st.session_state.keys():
@@ -111,7 +58,7 @@ def clear_chat_history():
 st.sidebar.button("Clear Chat History", on_click=clear_chat_history)
 
 
-def generate_llama2_response(prompt_input):
+def generate_response(prompt_input):
     # Add new conversation to history
     st.session_state.history.append({"role": "user", "content": f"{prompt_input}"})
 
